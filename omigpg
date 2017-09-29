@@ -1,0 +1,107 @@
+#!/usr/bin/env ruby
+
+#
+# please execute the following command
+#
+# $ gem install gpgme -v 2.0
+#
+require "gpgme"
+require "tmpdir"
+
+IncorrectKey       = Class.new(StandardError)
+BadSignature       = Class.new(StandardError)
+GpgBinaryMissing   = Class.new(StandardError)
+GpgVersionMissing  = Class.new(StandardError)
+FingerPrintMissing = Class.new(StandardError)
+
+def decrypt_verify(
+  ciphertext,
+  recipient_privkey,
+  sender_pubkey,
+  gpg_module: nil,
+  password: nil
+)
+  in_a_directory(gpg_module) do
+    import(recipient_privkey); import(sender_pubkey)
+
+    GPGME::Crypto.new(pinentry_mode(password))
+      .decrypt(data(ciphertext)) { |sig| validate(sig) }
+      .to_s
+  end
+end
+
+def data(string = "")
+  GPGME::Data.new(string)
+end
+
+def validate_gpg_binary(bin_file)
+  File.exist?(bin_file) || raise(GpgBinaryMissing, bin_file)
+end
+
+def fingerprint(key)
+  key.fpr || raise(FingerPrintMissing)
+end
+
+def gpg_module(binary_file = nil)
+  binary_file ||= ENV["PATH"]
+    .split(/:/)
+    .map    { |path| File.join(path, "gpg1") }
+    .select { |path| File.exist?(path)       }
+    .first
+  validate_gpg_binary binary_file
+  binary_file
+end
+
+def import(key)
+  GPGME::Key.import(key).imports.first || \
+    raise(IncorrectKey,
+      "engine: #{GPGME::Engine.info.first.inspect}")
+end
+
+def in_a_directory(gpg_module_file, &block)
+  Dir.mktmpdir(".temp_gpg") do |home_dir|
+    GPGME::Engine.set_info(
+      GPGME::PROTOCOL_OpenPGP,
+      gpg_module(gpg_module_file),
+      home_dir
+    )
+    yield
+  end
+end
+
+def pinentry_mode(password)
+  { pinentry_mode: GPGME::PINENTRY_MODE_LOOPBACK }
+    .merge(suppress(password))
+end
+
+def suppress(password)
+  password ? { password: password } : {}
+end
+
+def validate(signature)
+  signature.valid? || raise(BadSignature)
+end
+
+case ARGV.first
+when "-h"
+  puts ""
+  puts "omigpg [your seckey] [sender's pubkey] [encrypted file path]"
+  puts ""
+else
+  abort "you need argument (file path of encrypted file)" unless ARGV.size > 2 
+  encrypted_file = ARGV[2]
+  #
+  # your GPG secret keyString here:
+  #
+  recipient_privkey = File.read(ARGV[0])
+
+  #
+  # sender's GPG public key here:
+  #
+  sender_pubkey = File.read(ARGV[1])
+
+  after_decryption_file_name = encrypted_file.gsub(".pgp", "") 
+  f = File.open(after_decryption_file_name, "w")
+  f.puts decrypt_verify(File.read(encrypted_file), recipient_privkey, sender_pubkey)
+  f.close
+end
