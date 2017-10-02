@@ -12,7 +12,7 @@ $ ./installer
 # usage
 
 ```
-omigpg seckey pubkey [ENCRYPTED001.txt.pgp]
+omigpg path/to/seckey path/to/pubkey [ENCRYPTED001.txt.pgp]
 ```
 
 
